@@ -1,7 +1,16 @@
-from langchain_core.prompts import ChatPromptTemplate
-from langchain.chains import create_history_aware_retriever
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.prompts import (
+    ChatPromptTemplate,
+    MessagesPlaceholder,
+)
+
+from langchain_classic.chains import (
+    create_history_aware_retriever,
+    create_retrieval_chain,
+)
+
+from langchain_classic.chains.combine_documents import (
+    create_stuff_documents_chain,
+)
 
 from src.llm import get_llm
 from src.vector_store import load_vector_store
@@ -11,7 +20,8 @@ from src.vector_store import load_vector_store
 # 1. Prompt for understanding follow-up questions
 # --------------------------------------------------
 
-CONTEXTUALIZE_PROMPT = """You are a question reformulation assistant.
+CONTEXTUALIZE_PROMPT = """
+You are a question reformulation assistant.
 
 Given the conversation history and the user's latest question,
 rewrite the latest question into a standalone question.
@@ -20,6 +30,7 @@ The standalone question must be understandable without the
 conversation history.
 
 Do NOT answer the question.
+
 Only return the rewritten question.
 
 Conversation History:
@@ -34,14 +45,15 @@ Latest User Question:
 # 2. Prompt for answering using company documents
 # --------------------------------------------------
 
-QA_PROMPT = """You are Ventryx AI, the company knowledge assistant
+QA_PROMPT = """
+You are Ventryx AI, the company knowledge assistant
 for Ventryx Technology.
 
 Answer the user's question using ONLY the information contained
 in the retrieved company documents.
 
-You can use the conversation history to understand references
-such as:
+You can use the conversation history to understand references such as:
+
 - it
 - they
 - this
@@ -74,8 +86,14 @@ User Question:
 """
 
 
+# --------------------------------------------------
+# 3. Create RAG Chain
+# --------------------------------------------------
+
 def get_rag_chain():
-    """Create conversational RAG pipeline."""
+    """
+    Create conversational RAG pipeline.
+    """
 
     # --------------------------------------------------
     # Load LLM
@@ -84,18 +102,18 @@ def get_rag_chain():
     llm = get_llm()
 
     # --------------------------------------------------
-    # Load vector store
+    # Load Vector Store
     # --------------------------------------------------
 
     vector_store = load_vector_store()
 
-    if not vector_store:
+    if vector_store is None:
         raise ValueError(
             "Vector store not found. Please process documents first."
         )
 
     # --------------------------------------------------
-    # Retriever
+    # Create Retriever
     # --------------------------------------------------
 
     retriever = vector_store.as_retriever(
@@ -103,50 +121,71 @@ def get_rag_chain():
     )
 
     # --------------------------------------------------
-    # Prompt to convert follow-up question
-    # into standalone question
+    # Prompt for Follow-up Questions
     # --------------------------------------------------
 
-    contextualize_prompt = ChatPromptTemplate.from_messages([
-        ("system", CONTEXTUALIZE_PROMPT),
-        ("human", "{input}")
-    ])
+    contextualize_prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                CONTEXTUALIZE_PROMPT,
+            ),
+            MessagesPlaceholder(
+                variable_name="chat_history"
+            ),
+            (
+                "human",
+                "{input}",
+            ),
+        ]
+    )
 
     # --------------------------------------------------
-    # History-aware retriever
+    # History-Aware Retriever
     # --------------------------------------------------
 
     history_aware_retriever = create_history_aware_retriever(
         llm,
         retriever,
-        contextualize_prompt
+        contextualize_prompt,
     )
 
     # --------------------------------------------------
-    # Final answer prompt
+    # Prompt for Final Answer
     # --------------------------------------------------
 
-    qa_prompt = ChatPromptTemplate.from_messages([
-        ("system", QA_PROMPT),
-        ("human", "{input}")
-    ])
+    qa_prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                QA_PROMPT,
+            ),
+            MessagesPlaceholder(
+                variable_name="chat_history"
+            ),
+            (
+                "human",
+                "{input}",
+            ),
+        ]
+    )
 
     # --------------------------------------------------
-    # Document answering chain
+    # Document Answering Chain
     # --------------------------------------------------
 
     document_chain = create_stuff_documents_chain(
         llm,
-        qa_prompt
+        qa_prompt,
     )
 
     # --------------------------------------------------
-    # Final conversational RAG chain
+    # Final Conversational RAG Chain
     # --------------------------------------------------
 
     retrieval_chain = create_retrieval_chain(
         history_aware_retriever,
-        document_chain
+        document_chain,
     )
 
     return retrieval_chain
